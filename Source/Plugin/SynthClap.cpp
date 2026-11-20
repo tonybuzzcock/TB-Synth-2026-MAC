@@ -535,34 +535,97 @@ private:
             *out = std::floor (d + 0.5);
             return true;
         }
-        // a knob: first its exact text ("OFF", "-inf", "+0 cents"), then the nearest number
+        // a knob: first a position showing exactly this text ("OFF", "-inf", "+0 cents")
         char buf[64];
         for (int k = 0; k <= kKnobSearch; ++k)
         {
-            const float v = (float) k / (float) kKnobSearch;
-            formatValue (i, v, buf, sizeof (buf), true);
-            if (! strcasecmp (buf, text)) { *out = v; return true; }
+            formatValue (i, knobAt (k), buf, sizeof (buf), true);
+            if (! strcasecmp (buf, text)) { *out = textRunMiddle (i, text, knobAt (k)); return true; }
         }
+        // else the number: find where the knob's reading crosses it, then narrow down
         double unit = 1.0;
-        const double want = parseNumber (text, &unit);
-        if (! (want == want)) return false;
+        const double want0 = parseNumber (text, &unit);
+        if (! (want0 == want0)) return false;
         const bool hasUnit = unit != 0.0;
-        double best = -1.0, bestErr = 1e300;
+        const double want = hasUnit ? want0 * unit : want0;
+        // (a word such as OFF counts as below every number)
+        double prevV = -1.0, prevG = 0.0, bestV = -1.0, bestErr = 1e300, firstCross = -1.0;
         for (int k = 0; k <= kKnobSearch; ++k)
         {
-            const float v = (float) k / (float) kKnobSearch;
-            formatValue (i, v, buf, sizeof (buf), true);
-            double u = 0.0;
-            const double got = parseNumber (buf, &u);
-            if (! (got == got)) continue;
-            const double err = hasUnit ? std::fabs (got * (u != 0.0 ? u : 1.0) - want * unit) : std::fabs (got - want);
-            if (err < bestErr) { bestErr = err; best = v; }
+            const double v = knobAt (k);
+            double g;
+            if (! reading (i, v, hasUnit, g)) g = -1e300;
+            else if (std::fabs (g - want) < bestErr) { bestErr = std::fabs (g - want); bestV = v; }
+            if (prevV >= 0.0 && (g - want) * (prevG - want) <= 0.0 && g != prevG)
+            {
+                // bisect between the two grid points
+                double lo = prevV, hi = v;
+                const bool rising = g > prevG;
+                for (int it = 0; it < 40; ++it)
+                {
+                    const double m = 0.5 * (lo + hi);
+                    double gm;
+                    if (! reading (i, m, hasUnit, gm)) gm = -1e300;
+                    if ((gm < want) == rising) lo = m; else hi = m;
+                }
+                // the reading equal to the number sits on one side of the crossing
+                const double ends[2] = { lo, hi };
+                for (int e = 0; e < 2; ++e)
+                {
+                    formatValue (i, (float) ends[e], buf, sizeof (buf), true);
+                    if (! strcasecmp (buf, text)) { *out = textRunMiddle (i, text, ends[e]); return true; }
+                }
+                // the same number written another way next to it ("1000 Hz" beside "1.00 kHz"): look nearby
+                for (int st = 1; st <= 600; ++st)
+                    for (int dir = -1; dir <= 1; dir += 2)
+                    {
+                        const double m = hi + dir * st * 2.0e-6;
+                        if (m < 0.0 || m > 1.0) continue;
+                        formatValue (i, (float) m, buf, sizeof (buf), true);
+                        if (! strcasecmp (buf, text)) { *out = textRunMiddle (i, text, m); return true; }
+                    }
+                if (firstCross < 0.0) firstCross = 0.5 * (lo + hi);
+            }
+            prevV = v; prevG = g;
         }
-        if (best < 0.0) return false;
-        *out = best;
+        if (firstCross >= 0.0) { *out = firstCross; return true; }
+        if (bestV < 0.0) return false;
+        *out = bestV;
         return true;
     }
-    enum { kKnobSearch = 4000 };
+    static float knobAt (int k) { return (float) k / (float) kKnobSearch; }
+    // the knob's reading at v, as a number (in base units when the text gives a unit)
+    static bool reading (int i, double v, bool inBaseUnits, double& g)
+    {
+        char buf[64];
+        formatValue (i, (float) v, buf, sizeof (buf), true);
+        double u = 0.0;
+        g = parseNumber (buf, &u);
+        if (! (g == g)) return false;
+        if (inBaseUnits && u != 0.0) g *= u;
+        return true;
+    }
+    // the middle of the stretch of travel around v that reads as this same text
+    static double textRunMiddle (int i, const char* text, double v)
+    {
+        char buf[64];
+        double edge[2];
+        for (int side = 0; side < 2; ++side)
+        {
+            double in = v, outV = side ? 1.0 : 0.0;
+            formatValue (i, (float) outV, buf, sizeof (buf), true);
+            if (! strcasecmp (buf, text)) { edge[side] = outV; continue; }
+            for (int it = 0; it < 40; ++it)
+            {
+                const double m = 0.5 * (in + outV);
+                formatValue (i, (float) m, buf, sizeof (buf), true);
+                if (! strcasecmp (buf, text)) in = m; else outV = m;
+            }
+            edge[side] = in;
+        }
+        return 0.5 * (edge[0] + edge[1]);
+    }
+    enum { kKnobSearch = 1000 };
     // "1.5 kHz" -> 1.5 with *scale 1000; "35 ms" -> 35, 0.001; "20 Hz" / "3 s" -> 1; no unit -> 0. NaN if no number.
     static double parseNumber (const char* t, double* scale)
     {

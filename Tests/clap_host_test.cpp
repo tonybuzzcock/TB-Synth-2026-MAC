@@ -150,6 +150,7 @@ int main (int argc, char** argv)
 {
     if (argc < 2) { std::printf ("usage: %s <plugin binary>\n", argv[0]); return 2; }
     setenv ("TBSYNTH_PRESET_FILE", "/tmp/tbsynth_clap_test_presets.txt", 1);
+    if (const char* seed = std::getenv ("TB_SEED")) std::srand ((unsigned) std::atoi (seed));
     std::printf ("Loading %s\n", argv[1]);
     void* lib = dlopen (argv[1], RTLD_NOW | RTLD_LOCAL);
     if (! lib) { std::printf ("dlopen failed: %s\n", dlerror()); return 1; }
@@ -188,9 +189,10 @@ int main (int argc, char** argv)
         for (size_t k = 0; k < names.size(); ++k) if (names[k] == info.name) { namesUnique = false; std::printf ("  duplicate name %s\n", info.name); }
         names.push_back (info.name);
         // every value's text reads back to the same text
-        for (int k = 0; k <= 20; ++k)
+        for (int k = 0; k <= 400; ++k)
         {
-            double pv = info.min_value + (info.max_value - info.min_value) * k / 20.0;
+            double pv = k <= 20 ? info.min_value + (info.max_value - info.min_value) * k / 20.0
+                                : info.min_value + (info.max_value - info.min_value) * (double) std::rand() / RAND_MAX;
             if (info.flags & CLAP_PARAM_IS_STEPPED) pv = std::floor (pv + 0.5);
             char t1[64] = { 0 }, t2[64] = { 0 };
             double back = -1;
