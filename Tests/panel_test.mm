@@ -507,11 +507,6 @@ int main (int argc, char** argv)
     {
         pump (0.2);
         NSData* quiet = renderPNG (panel, dir + "/panel_led_off.png");
-    // ------------------------------------------------------------ the level LED
-    std::printf ("\nLevel LED\n");
-    {
-        pump (0.2);
-        NSData* quiet = renderPNG (panel, dir + "/panel_led_off.png");
         // play a note through the plugin
         plug->start_processing (plug);
         clap_event_midi_t ev; std::memset (&ev, 0, sizeof (ev));
